@@ -1,0 +1,54 @@
+# Copy to `config.yaml` and edit. Environment variables (LOCAL_AGENT_*) override these.
+# Never put API keys in this file — they belong in `.env` or the environment.
+
+provider: ollama                       # gemini | ollama | mock
+model: null                            # optional override for the provider's own model setting
+
+workspace: ./workspace                 # hard filesystem boundary for every file tool
+data_dir: ~/.local-agent               # SQLite database and JSONL logs
+
+# --- Provider settings ----------------------------------------------------
+gemini_model: gemini-2.5-flash
+gemini_timeout_seconds: 120
+
+ollama_base_url: http://localhost:11434
+ollama_model: llama3.1
+ollama_timeout_seconds: 120
+
+# --- Approvals ------------------------------------------------------------
+approval_mode: risky                   # always | risky | automatic
+auto_approve_tools: []                 # only consulted in `automatic` mode
+
+# --- Limits ---------------------------------------------------------------
+max_steps: 20
+max_tool_calls_per_step: 4
+max_total_tool_calls: 40
+max_retries_per_action: 2
+provider_timeout_seconds: 120
+tool_timeout_seconds: 30
+max_file_bytes: 1000000
+max_tool_output_chars: 12000
+max_model_output_tokens: 4096
+max_conversation_messages: 200
+max_persisted_facts: 500
+max_search_results: 100
+
+# --- Shell policy ---------------------------------------------------------
+# Deny-by-default: only these program names may be executed, and only after approval.
+shell_allowed_commands:
+  - ls
+  - cat
+  - head
+  - tail
+  - wc
+  - echo
+  - pwd
+  - grep
+  - find
+  - python3
+  - pytest
+  - git
+
+# --- Logging --------------------------------------------------------------
+log_level: INFO
+verbose_tool_logging: false            # opt-in debug detail; still redacted

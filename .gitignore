@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets and local state — never commit these
+.env
+.env.*
+!.env.example
+config.yaml
+config.yml
+config.local.yaml
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Agent runtime data
+workspace/
+.local-agent/
+*.sqlite3
+*.sqlite3-journal
+*.db
+logs/
+*.jsonl
