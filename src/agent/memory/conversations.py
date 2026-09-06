@@ -57,6 +57,22 @@ class ConversationStore:
         row = self.db.query_one("SELECT * FROM sessions WHERE id = ?", (session_id,))
         return dict(row) if row else None
 
+    def find_session(self, prefix: str) -> dict[str, Any] | None:
+        """Resolve a session by full id or unambiguous prefix.
+
+        A listing can truncate an id to fit the terminal, so a user copying one
+        off their own screen may hand back only its first characters. Matching a
+        unique prefix — and refusing an ambiguous one — is what makes that work.
+        """
+        exact = self.get_session(prefix)
+        if exact is not None:
+            return exact
+        cleaned = prefix.rstrip(".\u2026 ")
+        rows = self.db.query("SELECT id FROM sessions WHERE id LIKE ? LIMIT 2", (f"{cleaned}%",))
+        if len(rows) == 1:
+            return self.get_session(rows[0]["id"])
+        return None
+
     def delete_session(self, session_id: str) -> int:
         """Delete a session and everything attached to it. Returns rows removed."""
         with self.db.transaction() as connection:

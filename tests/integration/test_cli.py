@@ -23,6 +23,8 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[P
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # Render tables wide enough that rich does not truncate ids in the output.
+    monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     # Clear any LOCAL_AGENT_* variables inherited from the developer's shell.

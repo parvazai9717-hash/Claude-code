@@ -94,6 +94,22 @@ def test_get_messages_limit_returns_the_most_recent(database: Database) -> None:
     assert [m.content for m in recent] == ["m3", "m4"]
 
 
+def test_find_session_resolves_a_prefix_and_an_ellipsis(database: Database) -> None:
+    store = ConversationStore(database)
+    session = store.create_session(title="t")
+    assert store.find_session(session) is not None
+    assert store.find_session(session[:10]) is not None
+    assert store.find_session(session[:10] + "\u2026") is not None
+    assert store.find_session("sess_nothing") is None
+
+
+def test_find_session_refuses_an_ambiguous_prefix(database: Database) -> None:
+    store = ConversationStore(database)
+    store.create_session(session_id="sess_aaaa1111")
+    store.create_session(session_id="sess_aaaa2222")
+    assert store.find_session("sess_aaaa") is None
+
+
 def test_deleting_a_session_removes_its_messages(database: Database) -> None:
     store = ConversationStore(database)
     session = store.create_session()
@@ -182,6 +198,24 @@ def test_find_by_prefix(database: Database) -> None:
     store.save(task)
     assert store.find(task.id[:10]) is not None
     assert store.find("nomatch") is None
+
+
+def test_find_tolerates_a_truncated_id(database: Database) -> None:
+    """A listing can clip an id with an ellipsis; the user copies it back as-is."""
+    store = TaskStore(database)
+    task = TaskState(goal="g")
+    store.save(task)
+    assert store.find(task.id[:10] + "\u2026") is not None
+    assert store.find(task.id[:10] + "...") is not None
+
+
+def test_find_refuses_an_ambiguous_prefix(database: Database) -> None:
+    store = TaskStore(database)
+    first, second = TaskState(goal="a"), TaskState(goal="b")
+    second.id = first.id[:8] + "different"
+    store.save(first)
+    store.save(second)
+    assert store.find(first.id[:8]) is None
 
 
 def test_listing_filters_by_status(database: Database) -> None:

@@ -65,11 +65,16 @@ class TaskStore:
             raise StorageError(f"task {task_id} could not be loaded: {exc}") from exc
 
     def find(self, prefix: str) -> TaskState | None:
-        """Load a task by full id or unambiguous prefix."""
+        """Load a task by full id or unambiguous prefix.
+
+        A listing can truncate an id to fit the terminal, so the trailing ellipsis
+        a user may copy along with it is stripped before matching.
+        """
         exact = self.load(prefix)
         if exact is not None:
             return exact
-        rows = self.db.query("SELECT id FROM tasks WHERE id LIKE ? LIMIT 2", (f"{prefix}%",))
+        cleaned = prefix.rstrip(".\u2026 ")
+        rows = self.db.query("SELECT id FROM tasks WHERE id LIKE ? LIMIT 2", (f"{cleaned}%",))
         if len(rows) == 1:
             return self.load(rows[0]["id"])
         return None

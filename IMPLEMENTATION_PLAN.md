@@ -80,10 +80,11 @@ Final run, offline, with no network, no API key, no Ollama server and no browser
 
 ```text
 $ .venv/bin/python -m pytest
-418 passed in 3.83s
+430 passed in 3.95s
 
-$ .venv/bin/python -m pytest tests/unit          341 passed
-$ .venv/bin/python -m pytest tests/integration    77 passed
+$ .venv/bin/python -m pytest tests/unit          345 passed
+$ .venv/bin/python -m pytest tests/integration    85 passed
+$ .venv/bin/python -m pytest --cov=agent         92% statement coverage
 
 $ .venv/bin/python -m ruff format src tests scripts   all formatted
 $ .venv/bin/python -m ruff check  src tests scripts   All checks passed!
@@ -125,6 +126,11 @@ Recorded because each was caught by a test rather than by inspection:
 6. **Three untested paths were reported as complete**: `ConsoleApprover`, the `chat`
    command, and the slash commands had no automated coverage, and the first was wrongly
    described as untestable here. All three are now covered.
+7. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
+   terminal (`sess_f42d09c07e…`), so a user copying one off their own screen got
+   "no session named …". Sessions now resolve by unambiguous prefix — as tasks already
+   did — and both strip a trailing ellipsis. Found by a test that scraped a rendered
+   table, which is exactly what a user does by hand.
 
 ## Manual tests that could not be run here
 

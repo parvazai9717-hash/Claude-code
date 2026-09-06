@@ -355,8 +355,11 @@ def chat(
     session_id = session or None
     history: list[Message] = []
     if session_id:
-        if conversations.get_session(session_id) is None:
+        resolved = conversations.find_session(session_id)
+        if resolved is None:
             _fail(f"no session named {session_id}")
+            return
+        session_id = resolved["id"]
         history = conversations.get_messages(session_id)
         console.print(f"[dim]Resumed session {session_id} ({len(history)} messages)[/dim]")
 
@@ -795,9 +798,11 @@ def sessions_show(
     """Print the messages in a session."""
     context = get_context()
     store = ConversationStore(context.database)
-    if store.get_session(session_id) is None:
+    session = store.find_session(session_id)
+    if session is None:
         _fail(f"no session named {session_id}")
         return
+    session_id = session["id"]
     for message in store.get_messages(session_id, limit=limit):
         colour = {"user": "cyan", "assistant": "white", "tool": "dim", "system": "dim"}[
             message.role
@@ -813,9 +818,11 @@ def sessions_delete(session_id: str = typer.Argument(...)) -> None:
     """Delete a session and its messages."""
     context = get_context()
     store = ConversationStore(context.database)
-    if store.get_session(session_id) is None:
+    session = store.find_session(session_id)
+    if session is None:
         _fail(f"no session named {session_id}")
         return
+    session_id = session["id"]
     count = store.count_messages(session_id)
     if not typer.confirm(f"delete session {session_id} and its {count} message(s)?"):
         console.print("[dim]cancelled[/dim]")
