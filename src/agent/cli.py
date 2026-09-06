@@ -1130,7 +1130,10 @@ def clear_data(
     connectors: bool = typer.Option(
         False,
         "--connectors",
-        help="Also delete connector definitions. They are configuration, so they are kept by default.",
+        help=(
+            "Also delete connector definitions. They are configuration, "
+            "so they are kept by default."
+        ),
     ),
 ) -> None:
     """Delete stored data: sessions, messages, tasks, facts and events.
