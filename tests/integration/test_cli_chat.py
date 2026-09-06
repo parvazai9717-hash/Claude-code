@@ -8,8 +8,6 @@ driven through stdin.
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -21,34 +19,9 @@ from agent.providers.mock import MockProvider
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    # Render tables wide enough that rich does not truncate ids in the output.
-    monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    for key in list(os.environ):
-        if key.startswith("LOCAL_AGENT_"):
-            monkeypatch.delenv(key, raising=False)
-    yield home
-    from agent import cli
-
-    cli._state.clear()
-
-
-@pytest.fixture
-def scripted(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    """Replace the provider factory with a scripted mock, keeping everything else real."""
-
-    def install(*responses: object) -> MockProvider:
-        provider = MockProvider(list(responses))
-        monkeypatch.setattr("agent.cli.create_provider", lambda config, **kw: provider)
-        return provider
-
-    return install
+# `~` is redirected into a temporary directory by the shared `isolated_home`
+# fixture in conftest.py, which also clears LOCAL_AGENT_* and resets CLI state.
+pytestmark = pytest.mark.usefixtures("isolated_home")
 
 
 def test_a_one_shot_goal_runs_the_whole_loop(

@@ -388,7 +388,10 @@ Full detail is in [`SECURITY.md`](SECURITY.md). In short:
 
 The whole suite runs offline: **no network, no API key, no Ollama server, no
 browser, no external account.** Tests use temporary directories and temporary
-SQLite databases and never touch the real home directory.
+SQLite databases, and `~` is redirected into a temporary directory on every
+platform — `HOME`, `USERPROFILE`, `HOMEDRIVE` and `HOMEPATH` are all set,
+because `expanduser` consults different ones on POSIX and Windows.
+`tests/integration/test_home_isolation.py` asserts this directly.
 
 ```bash
 make test                    # everything

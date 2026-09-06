@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -14,21 +12,9 @@ from agent.cli import app
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    for key in list(os.environ):
-        if key.startswith("LOCAL_AGENT_"):
-            monkeypatch.delenv(key, raising=False)
-    yield home
-    from agent import cli
-
-    cli._state.clear()
+# `~` is redirected into a temporary directory by the shared `isolated_home`
+# fixture in conftest.py, which also clears LOCAL_AGENT_* and resets CLI state.
+pytestmark = pytest.mark.usefixtures("isolated_home")
 
 
 def _invoke(*args: str):  # type: ignore[no-untyped-def]

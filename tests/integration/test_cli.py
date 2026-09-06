@@ -6,7 +6,6 @@ suite never reads or writes the real user environment.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,25 +16,9 @@ from agent.cli import app
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Point every path-derived default at a temporary directory."""
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    # Render tables wide enough that rich does not truncate ids in the output.
-    monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    # Clear any LOCAL_AGENT_* variables inherited from the developer's shell.
-    for key in list(__import__("os").environ):
-        if key.startswith("LOCAL_AGENT_"):
-            monkeypatch.delenv(key, raising=False)
-    yield home
-    # Reset the module-level context so each test builds its own.
-    from agent import cli
-
-    cli._state.clear()
+# `~` is redirected into a temporary directory by the shared `isolated_home`
+# fixture in conftest.py, which also clears LOCAL_AGENT_* and resets CLI state.
+pytestmark = pytest.mark.usefixtures("isolated_home")
 
 
 def _invoke(*args: str):  # type: ignore[no-untyped-def]

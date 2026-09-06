@@ -164,7 +164,18 @@ Recorded because each was caught by a test rather than by inspection:
    `media.py` fell back to the filename when the bytes matched no signature, so a zip
    renamed `.png` passed as an image. Detection is now content-only, and an
    unrecognised file is refused with a message saying renaming will not help.
-8. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
+8. **The test suite wrote to the real home directory on Windows.** The CLI
+   fixtures set only `HOME`, which isolates nothing on Windows: `expanduser`
+   reads `USERPROFILE` there and ignores `HOME` entirely. A plain `pytest` run
+   therefore left its tasks, facts and connectors in the user's real
+   `~/.local-agent`. Found by a user running the installer on Windows and
+   noticing `doctor` report 13 tasks and three connectors on a fresh install.
+   The fixtures are now one shared `isolated_home` in `conftest.py` that sets
+   `HOME`, `USERPROFILE`, `HOMEDRIVE` and `HOMEPATH`, asserts the redirection
+   took effect before any test uses it, and is pinned by
+   `tests/integration/test_home_isolation.py` — which exercises `posixpath` and
+   `ntpath` expansion side by side so a Linux run catches a Windows-only hole.
+9. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
    terminal (`sess_f42d09c07e…`), so a user copying one off their own screen got
    "no session named …". Sessions now resolve by unambiguous prefix — as tasks already
    did — and both strip a trailing ellipsis. Found by a test that scraped a rendered
