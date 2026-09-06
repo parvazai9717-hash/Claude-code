@@ -35,6 +35,19 @@ max_search_results: 100
 
 # --- Shell policy ---------------------------------------------------------
 # Deny-by-default: only these program names may be executed, and only after approval.
+#
+# These are Unix tool names. On WINDOWS most of them do not exist, and `run_shell`
+# will report "allowlisted but not installed" rather than doing anything. Replace
+# the list with programs you actually have, for example:
+#
+#   shell_allowed_commands:
+#     - git
+#     - python          # `python3` is not a Windows executable name
+#     - pytest
+#     - findstr         # the Windows equivalent of grep
+#     - where           # the Windows equivalent of which
+#
+# Or set `shell_enabled: false` below to remove the capability entirely.
 shell_allowed_commands:
   - ls
   - cat
@@ -48,6 +61,10 @@ shell_allowed_commands:
   - python3
   - pytest
   - git
+
+# Set to false to remove shell execution entirely, rather than relying on the
+# allowlist alone. Recommended on Windows if you do not need it.
+shell_enabled: true
 
 # --- Media (images, audio, video) -----------------------------------------
 media:
