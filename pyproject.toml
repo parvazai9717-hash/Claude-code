@@ -20,13 +20,16 @@ dependencies = [
 
 [project.optional-dependencies]
 gemini = ["google-genai>=1.0"]
+mcp = ["mcp>=1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
     "types-PyYAML",
 ]
+all = ["local-agent[gemini,mcp]"]
 
 [project.scripts]
 local-agent = "agent.__main__:main"

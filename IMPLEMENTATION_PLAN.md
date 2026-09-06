@@ -73,6 +73,40 @@ runnable and tested; only the file-creation order changed, not the scope or the 
 | 11 | CLI polish: all commands, doctor, progress events, data clearing | complete |
 | 12 | Browser boundary: normalized interface + unavailable implementation | complete |
 | 13 | Quality and documentation | complete |
+| 14 | Multimodal: images and audio as first-class input | complete |
+| 15 | Connectors: MCP servers, security-gated | complete (offline tests; live server pending) |
+| 16 | Management API and connector CLI | complete |
+| 17 | UI master prompt | complete (the UI itself is not built) |
+
+## Phases 14-17: connectors, multimodal, and the UI brief
+
+Added after the first stable release, at the user's request: MCP connectors, image
+and audio understanding, a UI-facing management API, and a master prompt for building
+the UI itself.
+
+### Decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 13 | MCP servers are modelled as **connectors**, not a bespoke subsystem | "Add MCP and connectors" is one concept, not two: a connector is a named source of tools, and MCP is its first kind. One UI page, one CRUD surface. |
+| 14 | Connector tools go through the **existing registry**, unchanged | A second, weaker path into the machine is the thing worth not building. Namespacing, approval, redaction and limits all apply unchanged. |
+| 15 | Remote tools are **side-effecting until an operator says otherwise** | The runtime cannot know whether a remote `search` writes to something. Guessing optimistically is how an agent deletes a database. |
+| 16 | Server-supplied tool descriptions are **untrusted input** | A hostile server can put instructions in a description. They are attributed, defanged and capped, and the prompt states they are documentation. |
+| 17 | Only **named** environment variables reach a stdio server | Mirrors the shell tool's scrubbed environment: a connector must not inherit every credential the agent holds. |
+| 18 | Media type is decided by **magic number, never extension** | A zip renamed `.png` reaching a model as an image is a real hazard; a declared type disagreeing with the bytes is an error, not a guess. |
+| 19 | `view_media` is **not registered** for a text-only model | A tool whose result the model cannot perceive is worse than no tool: it burns a call and invites a fabricated description. |
+| 20 | **Video is opt-in and off by default** | The request said "if videos are difficult, then not videos". The type exists and Gemini declares support, but nothing accepts video unless it is explicitly enabled. |
+| 21 | `manage.py` is a **plain-Python API**, and the CLI is a renderer over it | A UI is another renderer over the same calls, so there is one implementation and no privileged path. |
+| 22 | Connector definitions live in **`connectors.json`**, not `config.yaml` | They are the part of configuration edited *through* the application; a UI writing them must not clobber a hand-written config file. |
+
+### Scope note
+
+Adding MCP genuinely widens the attack surface — a connector is third-party code
+providing tools to an autonomous agent. That is the user's call to make, and it was
+made explicitly. The build's response was to give connectors a tighter default leash
+than anything built in (disabled, namespaced, approval-gated, credential-scoped) and
+to document plainly, in `SECURITY.md`, what the remaining exposure is: an enabled
+connector you approve an action for can do whatever that action does remotely.
 
 ## Test results
 
@@ -80,15 +114,15 @@ Final run, offline, with no network, no API key, no Ollama server and no browser
 
 ```text
 $ .venv/bin/python -m pytest
-430 passed in 3.95s
+558 passed in 4.27s
 
-$ .venv/bin/python -m pytest tests/unit          345 passed
-$ .venv/bin/python -m pytest tests/integration    85 passed
-$ .venv/bin/python -m pytest --cov=agent         92% statement coverage
+$ .venv/bin/python -m pytest tests/unit          443 passed
+$ .venv/bin/python -m pytest tests/integration   115 passed
+$ .venv/bin/python -m pytest --cov=agent         91% statement coverage
 
 $ .venv/bin/python -m ruff format src tests scripts   all formatted
 $ .venv/bin/python -m ruff check  src tests scripts   All checks passed!
-$ .venv/bin/python -m mypy                            no issues in 44 source files
+$ .venv/bin/python -m mypy                            no issues in 53 source files
 $ .venv/bin/python scripts/demo_offline.py            DEMO PASSED
 ```
 
@@ -126,7 +160,11 @@ Recorded because each was caught by a test rather than by inspection:
 6. **Three untested paths were reported as complete**: `ConsoleApprover`, the `chat`
    command, and the slash commands had no automated coverage, and the first was wrongly
    described as untestable here. All three are now covered.
-7. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
+7. **The extension fallback defeated content verification.** The first draft of
+   `media.py` fell back to the filename when the bytes matched no signature, so a zip
+   renamed `.png` passed as an image. Detection is now content-only, and an
+   unrecognised file is refused with a message saying renaming will not help.
+8. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
    terminal (`sess_f42d09c07e…`), so a user copying one off their own screen got
    "no session named …". Sessions now resolve by unambiguous prefix — as tasks already
    did — and both strip a trailing ellipsis. Found by a test that scraped a rendered
@@ -143,6 +181,9 @@ They are **pending**, not passing:
 | Live Gemini health check | `local-agent -p gemini doctor` | Same. Verified only that it reports the missing key correctly. |
 | Live Ollama generation | `local-agent -p ollama chat "..."` | No Ollama server running. |
 | Ollama model capability probe | `local-agent -p ollama doctor` | Same. |
+| A live MCP server over stdio | `local-agent connectors test NAME` | No MCP server installed (`npx` unavailable). Partially exercised: a real connect was attempted and correctly timed out without breaking the run. |
+| A live MCP server over HTTP | `local-agent connectors test NAME` | No reachable MCP endpoint. |
+| Image understanding against a real model | `local-agent -p gemini chat "describe files/x.png"` | Needs a Gemini key. The attachment path is covered offline end to end. |
 
 An earlier draft of this table also listed the interactive approval prompt as
 untestable "because it needs a TTY". That was wrong: `ConsoleApprover` writes to an

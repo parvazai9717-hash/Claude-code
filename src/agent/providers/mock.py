@@ -39,13 +39,21 @@ class MockProvider(BaseProvider):
         *,
         model: str = "mock-model",
         supports_tools: bool = True,
+        supports_vision: bool = True,
+        supports_audio: bool = True,
+        supports_video: bool = False,
         healthy: bool = True,
         repeat_last: bool = False,
     ) -> None:
         super().__init__(model=model, timeout=5.0)
         self.script: list[ScriptEntry] = list(script or [])
         self.supports_tools = supports_tools
+        self.supports_vision = supports_vision
+        self.supports_audio = supports_audio
+        self.supports_video = supports_video
         self.healthy = healthy
+        #: Attachments the runtime actually sent, for assertions.
+        self.received_attachments: list[Any] = []
         #: When the script runs out, either repeat the last entry or stop cleanly.
         self.repeat_last = repeat_last
         #: Every call the runtime made, for assertions.
@@ -104,6 +112,8 @@ class MockProvider(BaseProvider):
         temperature: float = 0.2,
         max_output_tokens: int | None = None,
     ) -> ModelResponse:
+        for message in messages:
+            self.received_attachments.extend(message.attachments)
         self.calls.append(
             {
                 "messages": list(messages),
@@ -154,4 +164,7 @@ class MockProvider(BaseProvider):
             streaming=False,
             system_instruction=True,
             max_context_tokens=32_000,
+            vision=self.supports_vision,
+            audio=self.supports_audio,
+            video=self.supports_video,
         )

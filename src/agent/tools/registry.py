@@ -362,6 +362,9 @@ class ToolRegistry:
             self._emit_result(result, context)
             return result
 
+        # Media rides on a private key so it never passes through redaction and
+        # truncation as if it were text, and never reaches the model as base64.
+        attachments = self._extract_attachments(output)
         safe_output, truncated = self._sanitize(output, context)
         result = ToolResult(
             call_id=call.id,
@@ -370,9 +373,21 @@ class ToolRegistry:
             output=safe_output,
             duration_ms=timer.elapsed_ms,
             truncated=truncated,
+            attachments=attachments,
         )
         self._emit_result(result, context)
         return result
+
+    @staticmethod
+    def _extract_attachments(output: dict[str, Any]) -> list[Any]:
+        """Remove and return any attachments a tool placed on its output."""
+        found: list[Any] = []
+        for key in ("_attachment", "_attachments"):
+            value = output.pop(key, None)
+            if value is None:
+                continue
+            found.extend(value if isinstance(value, list) else [value])
+        return found
 
     def _sanitize(
         self, output: dict[str, Any], context: ToolContext

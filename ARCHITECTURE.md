@@ -35,6 +35,9 @@ src/agent/
 ├── memory/         database · conversations · facts · tasks · summaries
 ├── security/       paths · permissions · approvals · redaction · limits
 ├── skills/         manifest · loader · registry
+├── connectors/     config · store · client · tools · manager   (MCP servers)
+├── media.py        attachments, content sniffing, per-kind limits
+├── manage.py       the management API a CLI or UI drives
 └── browser/        base · unavailable        (boundary only)
 ```
 
@@ -274,6 +277,70 @@ A malformed skill is reported, not fatal: discovery keeps the valid ones usable 
 returns the problems for `local-agent skills list` to display.
 
 ---
+
+## Connectors
+
+A **connector** is a named source of extra tools — today, an MCP server over
+stdio or streamable HTTP.
+
+```text
+ConnectorConfig  what/where/credentials-by-name       config.py
+ConnectorStore   JSON at <data_dir>/connectors.json   store.py
+MCPConnection    transport, discovery, invocation     client.py
+MCPTool          wraps a remote tool as a local Tool  tools.py
+ConnectorManager connect, discover, health, shutdown  manager.py
+```
+
+The governing idea is that **there is no second path into the machine**. Once
+wrapped, a connector's tool is indistinguishable to the runtime from a built-in
+one: same registry, same argument validation, same permission check, same
+approval prompt, same timeout, same redaction.
+
+What differs is the *default posture*, because a connector is code we did not
+write and cannot audit:
+
+- **Disabled by default**, enabled per connector.
+- **Namespaced** `mcp__<connector>__<tool>`, so a connector cannot shadow a
+  built-in tool. The prefix also makes the origin visible in every approval
+  prompt and log line.
+- **Side-effecting until declared otherwise.** The runtime cannot know whether a
+  remote `search` writes to something, so every remote tool requires approval
+  unless an operator has explicitly listed it as read-only.
+- **Descriptions are untrusted input.** A hostile server can put instructions in
+  a tool description. `sanitize_description` attributes the text to its server,
+  neutralises instruction-shaped phrasing, and caps its length; the system prompt
+  states that `mcp__` descriptions are documentation, never instruction.
+- **Only named environment variables** reach a stdio server, mirroring the shell
+  tool's scrubbed environment.
+- **Failure is isolated.** Connectors are contacted concurrently and a broken one
+  contributes no tools and a reported reason, rather than failing the run.
+
+## Media
+
+`media.py` carries images, audio and (opt-in) video as `Attachment` objects.
+
+- **Content decides the type.** Detection is by magic number; the filename is
+  used only in error messages. A declared type that disagrees with the bytes is a
+  hard error, because a mislabelled file reaching a model as something it is not
+  is exactly the hazard worth refusing.
+- **Bounded** per kind, and checked *before* the file is read into memory.
+- **Capability-gated.** `ProviderCapabilities` declares `vision`, `audio` and
+  `video`. Gemini declares all three; Ollama declares vision only when
+  `/api/show` reports it, and never audio or video. `view_media` refuses to load
+  what the active model cannot perceive, and `build_runner` does not register the
+  tool at all for a text-only model.
+- Attachments ride on `ToolResult` under a private key, so they never pass
+  through redaction and truncation as if they were text, and never reach the
+  model as base64.
+
+## The management API
+
+`manage.py` exposes configuration and inspection as plain Python returning plain
+dictionaries: connector CRUD, tool and provider listings, media support, skills,
+tasks, sessions, facts, and a dashboard summary. The CLI is a renderer over it,
+and a UI would be another — so there is one implementation, not two, and no
+privileged path. It never returns a credential: connectors name environment
+variables and the API reports only whether they are set.
 
 ## Browser boundary
 

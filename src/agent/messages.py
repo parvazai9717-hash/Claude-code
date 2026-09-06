@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import ErrorCategory
+from .media import Attachment
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -77,6 +78,8 @@ class ToolResult(BaseModel):
     truncated: bool = False
     verified: bool | None = None
     verification_evidence: str | None = None
+    #: Media the tool loaded, to be shown to the model on the answering message.
+    attachments: list[Attachment] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_model_text(self) -> str:
@@ -99,6 +102,8 @@ class ToolResult(BaseModel):
             payload["verified"] = self.verified
             if self.verification_evidence:
                 payload["evidence"] = self.verification_evidence
+        if self.attachments:
+            payload["attachments"] = [a.summary() for a in self.attachments]
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
@@ -111,6 +116,9 @@ class Message(BaseModel):
     # Set on `tool` messages: which call this message answers.
     tool_call_id: str | None = None
     name: str | None = None
+    #: Images or audio the model should actually look at or listen to. Only a
+    #: provider that declares support for the kind will receive them.
+    attachments: list[Attachment] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -119,8 +127,8 @@ class Message(BaseModel):
         return cls(role="system", content=content)
 
     @classmethod
-    def user(cls, content: str) -> Message:
-        return cls(role="user", content=content)
+    def user(cls, content: str, attachments: list[Attachment] | None = None) -> Message:
+        return cls(role="user", content=content, attachments=attachments or [])
 
     @classmethod
     def assistant(cls, content: str = "", tool_calls: list[ToolCall] | None = None) -> Message:
@@ -133,6 +141,7 @@ class Message(BaseModel):
             content=result.to_model_text(),
             tool_call_id=result.call_id,
             name=result.tool_name,
+            attachments=list(result.attachments),
         )
 
 
@@ -187,6 +196,17 @@ class ProviderCapabilities(BaseModel):
     streaming: bool = False
     system_instruction: bool = True
     max_context_tokens: int | None = None
+    #: Media the provider accepts as input. Anything not declared here is dropped
+    #: with a warning rather than sent and silently ignored.
+    vision: bool = False
+    audio: bool = False
+    video: bool = False
+
+    def accepts(self, kind: Any) -> bool:
+        """Whether this provider accepts a given :class:`~agent.media.MediaKind`."""
+        return {"image": self.vision, "audio": self.audio, "video": self.video}.get(
+            str(kind), False
+        )
 
 
 class ModelResponse(BaseModel):

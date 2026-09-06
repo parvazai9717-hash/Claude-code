@@ -25,6 +25,9 @@ changes nothing in the runtime, the tools or the security layer.
 - [Memory](#memory)
 - [Tasks](#tasks)
 - [Skills](#skills)
+- [Connectors and MCP servers](#connectors-and-mcp-servers)
+- [Images and audio](#images-and-audio)
+- [Building a UI](#building-a-ui)
 - [Security](#security)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -55,7 +58,8 @@ workspace inspection · safe file reading, searching and writing · controlled s
 commands · persistent workspace · explicit task state · pause / resume / cancel /
 restart recovery · durable conversation history · user-approved memory · reusable
 skill metadata · Gemini or local-model switching · verification after consequential
-actions · structured progress events, approvals, errors and summaries.
+actions · structured progress events, approvals, errors and summaries ·
+**MCP server connectors** · **image and audio understanding**.
 
 ### Deliberately *not* enabled
 
@@ -431,6 +435,9 @@ then `task resume`.
 - **Shell is intentionally narrow.** No pipes, redirection, or shell metacharacters — argv only.
 - **Verification is structural.** It checks that a file exists, contains text, is absent, or that a command exits zero. It cannot judge whether the *content* is correct.
 - **Live provider calls are not covered by the test suite** — adapters are tested with fakes, since the suite must run with no network or credentials.
+- **Connectors are tested against a fake MCP session**, not a live server, for the same reason.
+- **Video input is defined but off by default**, and only Gemini declares support for it.
+- **No UI yet.** The management API and the brief for building one are in place; the UI itself is not built.
 
 ---
 

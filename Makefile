@@ -1,6 +1,6 @@
 PY ?= .venv/bin/python
 
-.PHONY: help venv install format lint typecheck test test-unit test-integration check smoke demo clean
+.PHONY: help venv install format lint typecheck test test-unit test-integration check smoke demo coverage clean
 
 help:
 	@echo "make install     Create .venv and install the project with dev extras"
@@ -16,7 +16,7 @@ venv:
 	uv venv --python 3.11 .venv || python3 -m venv .venv
 
 install: venv
-	uv pip install --python $(PY) -e ".[dev,gemini]" || $(PY) -m pip install -e ".[dev,gemini]"
+	uv pip install --python $(PY) -e ".[dev,gemini,mcp]" || $(PY) -m pip install -e ".[dev,gemini,mcp]"
 
 format:
 	$(PY) -m ruff format src tests
@@ -46,6 +46,9 @@ smoke:
 
 demo:
 	$(PY) scripts/demo_offline.py
+
+coverage:
+	$(PY) -m pytest --cov=agent --cov-report=term-missing
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache **/__pycache__

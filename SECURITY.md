@@ -27,6 +27,9 @@ The single most important property:
 | **False claims of success** | Consequential tools are marked `requires_verification`; the runtime classifies an outcome as `unverified` when evidence is missing, and says so in the summary. |
 | **A model approving its own actions** | No tool reaches an approver. The approver is called only by the runtime, and its decision is final. |
 | **Data left behind** | `clear-data` removes everything, after showing exactly what will be deleted. |
+| **A hostile MCP server** | Connectors are disabled by default, namespaced so they cannot shadow a built-in tool, approval-gated unless an operator declares a tool read-only, and given only the environment variables they name. |
+| **Prompt injection via a tool description** | A connector's descriptions are attributed to their server, stripped of instruction-shaped phrasing, length-capped, and declared to the model as documentation rather than instruction. |
+| **Mislabelled media** | A file's type is decided by its magic number, never its extension; a declared type that disagrees with the bytes is refused outright. |
 
 ### Explicitly out of scope
 
@@ -154,6 +157,49 @@ are never a default, and the CLI prints a warning whenever they are active.
 
 ---
 
+## Connectors and MCP servers
+
+A connector is third-party code providing tools. It gets a tighter leash than
+anything built in:
+
+- **Disabled by default.** Adding a connector is not the same as trusting it.
+  `local-agent connectors test NAME` shows exactly what a server offers before
+  you enable it.
+- **Namespaced** `mcp__<connector>__<tool>`. A connector cannot shadow
+  `read_file` or `run_shell`, and the prefix is visible in every approval prompt.
+- **Approval-gated by default.** A remote tool is assumed to have side effects,
+  because the runtime genuinely cannot tell. `--read-only` marks specific tools
+  as safe to run unattended — that is you asserting they have no side effects,
+  so verify before using it.
+- **`--allow` restricts** which remote tools are exposed at all.
+- **Credentials are named, not stored.** `connectors.json` holds environment
+  variable *names*; the values are read at connection time and never written.
+- **Only the named variables are forwarded** to a stdio server, plus a minimal
+  base environment. A connector cannot inherit every credential you hold.
+- **Bare command names only.** A stdio connector cannot point at an arbitrary
+  binary by path, mirroring the shell allowlist.
+- **Descriptions are untrusted.** They are attributed, defanged and capped, and
+  the system prompt tells the model they are documentation, not instruction.
+- **`connectors_enabled: false`** turns the entire capability off in one place,
+  whatever `connectors.json` says.
+
+**What this does not defend against.** An enabled connector you approve an action
+for can do whatever that action does on the remote side. Approval is the control;
+read the prompt. Treat adding a connector as running someone else's code, because
+it is.
+
+## Media
+
+- A file's type comes from its **magic number**, never its extension. A zip
+  renamed `.png` is refused, and a declared type that disagrees with the bytes is
+  an error rather than a guess.
+- Media loads are **workspace-bounded** like every other file access.
+- Each kind has its own **size cap**, checked before the file is read.
+- Media is **capability-gated**: `view_media` refuses to load what the active
+  model cannot perceive, and a text-only model is never offered the tool.
+- **Video is off by default.** Enabling it does not make an incapable provider
+  accept it.
+
 ## Browser
 
 Browser automation is **not enabled**. The interface in `agent/browser/` exists so a
@@ -213,6 +259,11 @@ It does not touch workspace files — those are yours to remove.
    allowlisted, read-mostly work.
 8. **Prefer a local model** when the goal involves data you do not want to leave the
    machine. With `provider: ollama` nothing is sent to a third party.
+9. **Audit connectors before enabling them.** `connectors test` lists every tool a
+   server offers. Use `--allow` to expose only what you need, and be sparing with
+   `--read-only`.
+10. **Remember that media is data too.** An image sent to Gemini leaves the
+    machine. With a local vision model it does not.
 
 ---
 

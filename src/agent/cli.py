@@ -23,6 +23,7 @@ from . import __version__
 from .config import ApprovalMode, Config, load_config
 from .errors import AgentError
 from .events import Event, EventBus, EventType, JsonlEventWriter, configure_logging
+from .manage import AgentManager
 from .memory.conversations import ConversationStore
 from .memory.database import Database
 from .memory.facts import FactStore
@@ -50,10 +51,16 @@ sessions_app = typer.Typer(
     name="sessions", help="Inspect conversation history.", no_args_is_help=True
 )
 skills_app = typer.Typer(name="skills", help="Inspect available skills.", no_args_is_help=True)
+connectors_app = typer.Typer(
+    name="connectors",
+    help="Add and manage MCP servers and other tool connectors.",
+    no_args_is_help=True,
+)
 app.add_typer(task_app)
 app.add_typer(memory_app)
 app.add_typer(sessions_app)
 app.add_typer(skills_app)
+app.add_typer(connectors_app)
 
 
 # --------------------------------------------------------------------------
@@ -82,6 +89,11 @@ def get_context() -> Context:
     if context is None:
         raise typer.Exit(code=2)
     return context
+
+
+def _manager(context: Context) -> AgentManager:
+    """The same management API a UI would use. The CLI is only a renderer over it."""
+    return AgentManager(config=context.config, database=context.database)
 
 
 def _fail(message: str, code: int = 1) -> None:
@@ -268,6 +280,33 @@ def doctor() -> None:
     except AgentError as exc:
         row("provider", False, exc.message)
 
+    manager = _manager(context)
+    media = manager.media_support()
+    accepted = [kind for kind, ok in media["accepted"].items() if ok]
+    row(
+        "media input",
+        bool(accepted),
+        (", ".join(accepted) if accepted else "text only")
+        + ("" if media["video_enabled"] else "; video disabled"),
+    )
+
+    connectors = manager.list_connectors()
+    if not config.connectors_enabled:
+        row("connectors", None, "disabled by configuration")
+    elif not connectors:
+        row("connectors", True, "none configured")
+    else:
+        enabled = [c for c in connectors if c["enabled"]]
+        row("connectors", True, f"{len(enabled)} enabled of {len(connectors)} configured")
+        for entry in connectors:
+            missing = entry.get("missing_credentials") or []
+            row(
+                f"  {entry['name']}",
+                None if not entry["enabled"] else not missing,
+                ("disabled" if not entry["enabled"] else "enabled")
+                + (f"; unset: {', '.join(missing)}" if missing else ""),
+            )
+
     registry = SkillRegistry.from_directory(config.skills_dir)
     row("skills", True, f"{len(registry)} loaded from {config.skills_dir}")
     for name, reason in registry.problems:
@@ -327,6 +366,7 @@ SLASH_HELP = """\
   /tools    the tools available in this run
   /model    the active provider and model
   /memory   durable facts you have approved
+  /connectors  configured MCP servers and other connectors
   /tasks    recent tasks
   /clear    clear the conversation in this session
   /quit     exit
@@ -417,6 +457,9 @@ def _run_once(
     )
 
     async def _go() -> RunResult:
+        loaded = await runner.load_connector_tools()
+        if loaded:
+            console.print(f"[dim]connector tools loaded: {', '.join(loaded)}[/dim]")
         loop = asyncio.get_running_loop()
         # Ctrl-C requests a cancellation rather than killing the process, so the
         # runtime can stop cleanly before its next consequential action. Not every
@@ -487,6 +530,8 @@ def _slash_command(
         console.print(table)
     elif command == "/model":
         console.print(f"{context.config.provider} / {context.config.active_model}")
+    elif command == "/connectors":
+        _print_connectors(_manager(context).list_connectors())
     elif command == "/memory":
         _print_facts(FactStore(context.database).list_facts(approved_only=True))
     elif command == "/tasks":
@@ -574,7 +619,11 @@ def task_run(
     task.cancel_requested = False
     task.pause_requested = False
 
-    result = asyncio.run(runner.run(task))
+    async def _go() -> RunResult:
+        await runner.load_connector_tools()
+        return await runner.run(task)
+
+    result = asyncio.run(_go())
     style = {"completed": "green", "unverified": "yellow", "partial": "yellow"}.get(
         result.outcome, "red"
     )
@@ -724,6 +773,17 @@ def task_recover() -> None:
 # --------------------------------------------------------------------------
 # memory / sessions / skills
 # --------------------------------------------------------------------------
+def _print_connectors(entries: list[dict[str, Any]]) -> None:
+    if not entries:
+        console.print("[dim]no connectors configured[/dim]")
+        return
+    for entry in entries:
+        state = "[green]enabled[/green]" if entry["enabled"] else "[dim]disabled[/dim]"
+        missing = entry.get("missing_credentials") or []
+        warning = f" [yellow](unset: {', '.join(missing)})[/yellow]" if missing else ""
+        console.print(f"  {entry['name']} — {state}{warning}")
+
+
 def _print_facts(rows: list[dict[str, Any]]) -> None:
     if not rows:
         console.print("[dim]no durable facts stored[/dim]")
@@ -878,6 +938,187 @@ def skills_show(name: str = typer.Argument(...)) -> None:
     console.print(Panel(skill.prompt_block(), title=skill.name, border_style="cyan"))
     if skill.body:
         console.print(skill.body)
+
+
+# --------------------------------------------------------------------------
+# connectors
+# --------------------------------------------------------------------------
+@connectors_app.command("list")
+def connectors_list(
+    as_json: bool = typer.Option(False, "--json", help="Print raw JSON, for scripting or a UI."),
+) -> None:
+    """List configured connectors and whether their credentials are present."""
+    context = get_context()
+    entries = _manager(context).list_connectors()
+    if as_json:
+        console.print_json(json.dumps(entries, indent=2, default=str))
+        return
+    if not entries:
+        console.print("[dim]no connectors configured[/dim]")
+        console.print("add one with: local-agent connectors add NAME --command npx --arg ...")
+        return
+    table = Table(title="Connectors")
+    table.add_column("Name", style="bold")
+    table.add_column("Kind")
+    table.add_column("Enabled")
+    table.add_column("Target", overflow="fold")
+    table.add_column("Credentials")
+    for entry in entries:
+        target = entry.get("url") or " ".join([entry.get("command", ""), *entry.get("args", [])])
+        missing = entry.get("missing_credentials") or []
+        credentials = (
+            f"[red]missing: {', '.join(missing)}[/red]"
+            if missing
+            else (
+                "[green]present[/green]" if entry["credentials"]["env_vars"] else "[dim]none[/dim]"
+            )
+        )
+        table.add_row(
+            entry["name"],
+            entry["kind"],
+            "[green]yes[/green]" if entry["enabled"] else "[dim]no[/dim]",
+            target.strip() or "-",
+            credentials,
+        )
+    console.print(table)
+    console.print(
+        "[dim]Connector tools are namespaced `mcp__<connector>__<tool>` and require "
+        "approval unless declared read-only.[/dim]"
+    )
+
+
+@connectors_app.command("add")
+def connectors_add(
+    name: str = typer.Argument(..., help="Short name; becomes the tool prefix."),
+    command: str = typer.Option("", "--command", help="Program for a stdio MCP server."),
+    arg: list[str] = typer.Option([], "--arg", help="Argument for the command. Repeatable."),
+    url: str = typer.Option("", "--url", help="URL for an HTTP MCP server."),
+    env: list[str] = typer.Option(
+        [], "--env", help="Environment variable to forward. Repeatable. Names only."
+    ),
+    header_env: list[str] = typer.Option(
+        [], "--header-env", help="HEADER=ENV_VAR for an HTTP connector. Repeatable."
+    ),
+    description: str = typer.Option("", "--description"),
+    enable: bool = typer.Option(False, "--enable", help="Enable it immediately."),
+    allow: list[str] = typer.Option(
+        [], "--allow", help="Only expose these remote tools. Repeatable."
+    ),
+    read_only: list[str] = typer.Option(
+        [], "--read-only", help="Remote tools you have verified are read-only. Repeatable."
+    ),
+    timeout: float = typer.Option(30.0, "--timeout"),
+    replace: bool = typer.Option(False, "--replace", help="Overwrite an existing connector."),
+) -> None:
+    """Add an MCP server. It starts disabled unless you pass --enable."""
+    context = get_context()
+    if bool(command) == bool(url):
+        _fail("give exactly one of --command (stdio) or --url (http)")
+        return
+    headers: dict[str, str] = {}
+    for pair in header_env:
+        if "=" not in pair:
+            _fail(f"--header-env expects HEADER=ENV_VAR, got {pair!r}")
+            return
+        header, variable = pair.split("=", 1)
+        headers[header.strip()] = variable.strip()
+
+    try:
+        entry = _manager(context).add_connector(
+            name=name,
+            kind="mcp_stdio" if command else "mcp_http",
+            command=command,
+            args=list(arg),
+            url=url,
+            env=list(env),
+            header_env=headers,
+            description=description,
+            enabled=enable,
+            tool_allowlist=list(allow),
+            read_only_tools=list(read_only),
+            timeout_seconds=timeout,
+            replace=replace,
+        )
+    except AgentError as exc:
+        _fail(exc.message)
+        return
+
+    console.print(f"added connector [bold]{entry['name']}[/bold]")
+    missing = entry.get("credentials", {}).get("env_vars", [])
+    if missing:
+        console.print(f"[dim]reads these environment variables: {', '.join(missing)}[/dim]")
+    if not enable:
+        console.print(f"enable it with: local-agent connectors enable {name}")
+    console.print(f"test it with:   local-agent connectors test {name}")
+
+
+@connectors_app.command("remove")
+def connectors_remove(
+    name: str = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation."),
+) -> None:
+    """Remove a connector definition."""
+    context = get_context()
+    manager = _manager(context)
+    if not any(c["name"] == name for c in manager.list_connectors()):
+        _fail(f"no connector named {name!r}")
+        return
+    if not yes and not typer.confirm(f"remove connector {name}?"):
+        console.print("[dim]cancelled[/dim]")
+        return
+    manager.remove_connector(name)
+    console.print(f"removed connector {name}")
+
+
+@connectors_app.command("enable")
+def connectors_enable(name: str = typer.Argument(...)) -> None:
+    """Enable a connector so its tools load on the next run."""
+    context = get_context()
+    entry = _manager(context).set_connector_enabled(name, True)
+    if entry is None:
+        _fail(f"no connector named {name!r}")
+        return
+    console.print(f"enabled [bold]{name}[/bold]")
+    console.print(
+        "[yellow]Its tools will be offered to the model on the next run. They require "
+        "approval unless you declared them read-only.[/yellow]"
+    )
+
+
+@connectors_app.command("disable")
+def connectors_disable(name: str = typer.Argument(...)) -> None:
+    """Disable a connector without deleting its definition."""
+    context = get_context()
+    entry = _manager(context).set_connector_enabled(name, False)
+    if entry is None:
+        _fail(f"no connector named {name!r}")
+        return
+    console.print(f"disabled {name}")
+
+
+@connectors_app.command("test")
+def connectors_test(
+    name: str | None = typer.Argument(None, help="Test one connector, or all of them."),
+) -> None:
+    """Contact connectors and list the tools each one offers."""
+    context = get_context()
+    try:
+        statuses = asyncio.run(_manager(context).test_connectors(name))
+    except AgentError as exc:
+        _handle(exc)
+        return
+    if not statuses:
+        console.print("[dim]no connectors configured[/dim]")
+        return
+    for status in statuses:
+        mark = "[green]ok[/green]" if status["ok"] else "[red]unavailable[/red]"
+        console.print(f"\n[bold]{status['name']}[/bold] {mark} — {status['detail']}")
+        if status["missing_credentials"]:
+            console.print(
+                f"  [yellow]unset variables: {', '.join(status['missing_credentials'])}[/yellow]"
+            )
+        for tool in status["tools"]:
+            console.print(f"  · {tool}")
 
 
 # --------------------------------------------------------------------------

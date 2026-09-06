@@ -155,11 +155,13 @@ class GeminiProvider(BaseProvider):
             if message.role == "system":
                 continue  # carried out of band as `system_instruction`
             if message.role == "user":
-                contents.append(
-                    types.Content(role="user", parts=[types.Part(text=message.content)])
-                )
-            elif message.role == "assistant":
                 parts: list[Any] = []
+                if message.content:
+                    parts.append(types.Part(text=message.content))
+                parts.extend(self._media_parts(message))
+                contents.append(types.Content(role="user", parts=parts or [types.Part(text="")]))
+            elif message.role == "assistant":
+                parts = []
                 if message.content:
                     parts.append(types.Part(text=message.content))
                 for call in message.tool_calls:
@@ -175,20 +177,37 @@ class GeminiProvider(BaseProvider):
                 if parts:
                     contents.append(types.Content(role="model", parts=parts))
             elif message.role == "tool":
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(
-                                function_response=types.FunctionResponse(
-                                    name=message.name or "tool",
-                                    response={"result": message.content},
-                                )
-                            )
-                        ],
+                parts = [
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=message.name or "tool",
+                            response={"result": message.content},
+                        )
                     )
-                )
+                ]
+                # Media a tool loaded is attached alongside its textual result, so
+                # the model can actually perceive what `view_media` fetched.
+                parts.extend(self._media_parts(message))
+                contents.append(types.Content(role="user", parts=parts))
         return contents
+
+    def _media_parts(self, message: Message) -> list[Any]:
+        """Convert a message's attachments into Gemini inline-data parts.
+
+        Anything this model cannot perceive is dropped rather than sent, and the
+        drop is recorded in metadata so the runtime can say so honestly.
+        """
+        from google.genai import types
+
+        capabilities = self.capabilities()
+        parts: list[Any] = []
+        for attachment in message.attachments:
+            if not capabilities.accepts(attachment.kind.value):
+                continue
+            parts.append(
+                types.Part.from_bytes(data=attachment.data, mime_type=attachment.mime_type)
+            )
+        return parts
 
     def _to_tools(self, tools: list[ToolDefinition]) -> list[Any]:
         from google.genai import types
@@ -403,11 +422,16 @@ class GeminiProvider(BaseProvider):
             )
 
     def capabilities(self) -> ProviderCapabilities:
+        # Gemini's multimodal models accept images, audio and video natively.
+        # Video is still gated by `media.enable_video` on the runtime side.
         return ProviderCapabilities(
             native_tool_calls=True,
             streaming=True,
             system_instruction=True,
             max_context_tokens=1_000_000,
+            vision=True,
+            audio=True,
+            video=True,
         )
 
     async def aclose(self) -> None:

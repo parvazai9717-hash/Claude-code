@@ -38,6 +38,9 @@ class ToolContext:
     step: int = 0
     #: Optional storage handle, injected for memory tools.
     store: Any = None
+    #: What the active model can perceive. Lets a tool refuse to load media the
+    #: provider would silently drop, instead of burning a call on nothing.
+    provider_capabilities: Any = None
 
     @property
     def max_output_chars(self) -> int:

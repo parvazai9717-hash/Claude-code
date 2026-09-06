@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .connectors.manager import ConnectorManager
 from .errors import (
     ErrorCategory,
     ProviderError,
@@ -52,7 +53,7 @@ from .tools.registry import ToolRegistry
 
 #: Tool names whose results count as observations rather than actions.
 READ_ONLY_OBSERVATION_TOOLS = frozenset(
-    {"get_current_time", "list_files", "read_file", "search_files"}
+    {"get_current_time", "list_files", "read_file", "search_files", "view_media"}
 )
 
 #: How many consecutive model turns with neither text nor tool calls are tolerated.
@@ -114,6 +115,7 @@ class AgentRunner:
         summary_store: SummaryStore | None = None,
         skills: SkillRegistry | None = None,
         redactor: Redactor | None = None,
+        connectors: ConnectorManager | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
@@ -125,6 +127,7 @@ class AgentRunner:
         self.fact_store = fact_store
         self.summary_store = summary_store
         self.skills = skills
+        self.connectors = connectors
         if approver is not None:
             self.tools.approver = approver
 
@@ -187,7 +190,31 @@ class AgentRunner:
             task_id=task.id,
             step=task.current_step,
             store=self.fact_store,
+            provider_capabilities=self._capabilities(),
         )
+
+    def _capabilities(self) -> Any:
+        """What the active provider can perceive, or None if it does not say."""
+        describe = getattr(self.provider, "capabilities", None)
+        return describe() if callable(describe) else None
+
+    async def load_connector_tools(self) -> list[str]:
+        """Register the tools of every enabled connector.
+
+        Called once before a run. A connector that cannot be reached contributes
+        nothing and is reported; it never prevents the run from starting.
+        """
+        if self.connectors is None:
+            return []
+        registered: list[str] = []
+        for tool in await self.connectors.load_tools():
+            if tool.name in self.tools:
+                # A namespaced collision means two connectors share a name, which
+                # the store prevents — but never let a late arrival shadow a tool.
+                continue
+            self.tools.register(tool)
+            registered.append(tool.name)
+        return registered
 
     # -- main loop ----------------------------------------------------------
     async def run(self, task: TaskState, *, history: list[Message] | None = None) -> RunResult:
@@ -354,6 +381,12 @@ class AgentRunner:
                     task_id=task.id,
                     session_id=task.session_id,
                     arguments=call.arguments,
+                )
+
+            if result.attachments:
+                task.record_observation(
+                    call.name,
+                    "loaded " + ", ".join(a.summary() for a in result.attachments),
                 )
 
             if result.ok and call.name in READ_ONLY_OBSERVATION_TOOLS:
@@ -657,6 +690,7 @@ def build_runner(
     events: EventBus | None = None,
     database: Any = None,
     include_shell: bool | None = None,
+    connectors: ConnectorManager | None = None,
 ) -> AgentRunner:
     """Assemble a fully wired runner.
 
@@ -681,14 +715,26 @@ def build_runner(
         bus.subscribe(task_store.event_writer())
 
     registry = ToolRegistry(permissions=PermissionChecker(config), approver=approver, events=bus)
+    # A text-only model is not offered `view_media`: a tool whose result the model
+    # cannot perceive is worse than no tool at all.
+    capabilities = provider.capabilities() if hasattr(provider, "capabilities") else None
+    perceives_media = capabilities is None or capabilities.vision or capabilities.audio
     registry.register_all(
         build_default_tools(
             include_shell=config.shell_enabled if include_shell is None else include_shell,
             include_memory=fact_store is not None,
+            include_media=perceives_media,
         )
     )
 
     skills = SkillRegistry.from_directory(config.skills_dir)
+
+    if connectors is None and config.connectors_enabled:
+        from .connectors.store import ConnectorStore
+
+        collection = ConnectorStore.for_data_dir(config.data_dir).load()
+        if collection.enabled():
+            connectors = ConnectorManager(collection, events=bus)
 
     return AgentRunner(
         config=config,
@@ -702,4 +748,5 @@ def build_runner(
         summary_store=summary_store,
         skills=skills,
         redactor=redactor,
+        connectors=connectors,
     )

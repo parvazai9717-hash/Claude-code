@@ -349,3 +349,85 @@ async def test_provider_failure_ends_the_run_cleanly(
     assert result.outcome == "failed"
     assert result.task.status is TaskStatus.FAILED
     assert result.task.failures[0].category is ErrorCategory.PROVIDER_UNAVAILABLE
+
+
+# -- 11. multimodal ----------------------------------------------------------
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+WAV_BYTES = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 64
+
+
+async def test_the_model_receives_the_image_it_asked_to_see(
+    config: Config, workspace: Path, approve_all: PolicyApprover
+) -> None:
+    (workspace / "files" / "chart.png").write_bytes(PNG_BYTES)
+    provider = MockProvider(
+        [
+            MockProvider.call("view_media", {"path": "files/chart.png"}),
+            MockProvider.text("The chart shows an upward trend."),
+        ]
+    )
+    runner = build_runner(config, provider=provider, approver=approve_all)
+    result = await runner.run(TaskState(goal="what does the chart show?"))
+    assert result.outcome == "completed"
+    assert [a.kind.value for a in provider.received_attachments] == ["image"]
+    assert provider.received_attachments[0].data == PNG_BYTES
+
+
+async def test_audio_reaches_a_model_that_accepts_it(
+    config: Config, workspace: Path, approve_all: PolicyApprover
+) -> None:
+    (workspace / "files" / "clip.wav").write_bytes(WAV_BYTES)
+    provider = MockProvider(
+        [
+            MockProvider.call("view_media", {"path": "files/clip.wav"}),
+            MockProvider.text("The clip is silent."),
+        ]
+    )
+    runner = build_runner(config, provider=provider, approver=approve_all)
+    await runner.run(TaskState(goal="what is in the clip?"))
+    assert [a.kind.value for a in provider.received_attachments] == ["audio"]
+
+
+async def test_a_text_only_model_is_never_offered_view_media(
+    config: Config, approve_all: PolicyApprover
+) -> None:
+    """A tool whose results the model cannot perceive is worse than no tool."""
+    provider = MockProvider([], supports_vision=False, supports_audio=False)
+    runner = build_runner(config, provider=provider, approver=approve_all)
+    assert "view_media" not in runner.tools.names()
+    assert "view_media" not in runner.build_system_message().content
+
+
+async def test_video_is_refused_while_disabled(
+    config: Config, workspace: Path, approve_all: PolicyApprover
+) -> None:
+    (workspace / "files" / "clip.mp4").write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64)
+    provider = MockProvider(
+        [
+            MockProvider.call("view_media", {"path": "files/clip.mp4"}),
+            MockProvider.text("I could not watch the video."),
+        ],
+        supports_video=True,
+    )
+    runner = build_runner(config, provider=provider, approver=approve_all)
+    result = await runner.run(TaskState(goal="watch the clip"))
+    assert result.task.actions[0].ok is False
+    assert result.task.actions[0].error_category is ErrorCategory.CAPABILITY_UNAVAILABLE
+    assert provider.received_attachments == []
+
+
+async def test_media_cannot_be_loaded_from_outside_the_workspace(
+    config: Config, tmp_path: Path, approve_all: PolicyApprover
+) -> None:
+    secret = tmp_path / "private.png"
+    secret.write_bytes(PNG_BYTES)
+    provider = MockProvider(
+        [
+            MockProvider.call("view_media", {"path": "../private.png"}),
+            MockProvider.text("I could not read outside the workspace."),
+        ]
+    )
+    runner = build_runner(config, provider=provider, approver=approve_all)
+    result = await runner.run(TaskState(goal="look at the private image"))
+    assert result.task.actions[0].error_category is ErrorCategory.PATH_ESCAPE
+    assert provider.received_attachments == []

@@ -49,6 +49,21 @@ shell_allowed_commands:
   - pytest
   - git
 
+# --- Media (images, audio, video) -----------------------------------------
+media:
+  max_image_bytes: 8000000
+  max_audio_bytes: 25000000
+  max_video_bytes: 50000000
+  max_attachments_per_message: 4
+  # Video is off by default: large, costly, and unsupported by most local
+  # models. Turning it on does not make an incapable provider accept it.
+  enable_video: false
+
+# --- Connectors (MCP servers) ---------------------------------------------
+# Master switch. Individual connectors live in <data_dir>/connectors.json and
+# are managed with `local-agent connectors ...`, not edited here.
+connectors_enabled: true
+
 # --- Logging --------------------------------------------------------------
 log_level: INFO
 verbose_tool_logging: false            # opt-in debug detail; still redacted

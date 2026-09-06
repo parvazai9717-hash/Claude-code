@@ -24,6 +24,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .errors import ConfigurationError
+from .media import MediaLimits
 
 ENV_PREFIX = "LOCAL_AGENT_"
 
@@ -164,8 +165,12 @@ class Config(BaseModel):
     shell_enabled: bool = True
 
     skills_dir: Path = Path("./skills")
+    #: Master switch. With this off, no connector is contacted whatever the
+    #: connector file says — one place to turn the whole capability off.
+    connectors_enabled: bool = True
 
     limits: Limits = Field(default_factory=Limits)
+    media: MediaLimits = Field(default_factory=MediaLimits)
 
     log_level: str = "INFO"
     verbose_tool_logging: bool = False
@@ -237,6 +242,11 @@ class Config(BaseModel):
     @property
     def log_path(self) -> Path:
         return self.data_dir / "events.jsonl"
+
+    @property
+    def connectors_path(self) -> Path:
+        """Where connector definitions live. Managed through the app, not by hand."""
+        return self.data_dir / "connectors.json"
 
     def credential_env_var(self) -> str | None:
         """The env var holding this provider's credential, if it needs one."""
@@ -331,9 +341,11 @@ def find_config_file(start: Path | None = None) -> Path | None:
 def _env_overrides(environ: dict[str, str]) -> dict[str, Any]:
     """Collect `LOCAL_AGENT_*` variables, mapping limit keys into `limits`."""
     limit_fields = set(Limits.model_fields)
+    media_fields = set(MediaLimits.model_fields)
     config_fields = set(Config.model_fields)
     overrides: dict[str, Any] = {}
     limits: dict[str, Any] = {}
+    media: dict[str, Any] = {}
     for key, raw in environ.items():
         if not key.startswith(ENV_PREFIX):
             continue
@@ -341,12 +353,16 @@ def _env_overrides(environ: dict[str, str]) -> dict[str, Any]:
         value = _coerce_env_value(raw)
         if field in limit_fields:
             limits[field] = value
+        elif field in media_fields:
+            media[field] = value
         elif field in config_fields:
             overrides[field] = value
         # Unknown LOCAL_AGENT_* names are ignored rather than failing startup:
         # the user may be setting variables for a future version or a wrapper.
     if limits:
         overrides["limits"] = limits
+    if media:
+        overrides["media"] = media
     return overrides
 
 
@@ -354,7 +370,11 @@ def _merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Shallow merge, with a nested merge for the `limits` mapping."""
     merged = dict(base)
     for key, value in overlay.items():
-        if key == "limits" and isinstance(value, dict) and isinstance(merged.get(key), dict):
+        if (
+            key in ("limits", "media")
+            and isinstance(value, dict)
+            and isinstance(merged.get(key), dict)
+        ):
             merged[key] = {**merged[key], **value}
         elif value is not None or key not in merged:
             merged[key] = value
@@ -404,6 +424,11 @@ def load_config(
         if flat_limits:
             existing = file_values.get("limits")
             file_values["limits"] = {**(existing or {}), **flat_limits}
+        media_fields = set(MediaLimits.model_fields)
+        flat_media = {k: file_values.pop(k) for k in list(file_values) if k in media_fields}
+        if flat_media:
+            existing_media = file_values.get("media")
+            file_values["media"] = {**(existing_media or {}), **flat_media}
 
     values = _merge(file_values, _env_overrides(env))
     values = _merge(values, {k: v for k, v in overrides.items() if v is not None})

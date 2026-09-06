@@ -21,6 +21,7 @@ from ..errors import (
     ProviderUnavailableError,
     ProviderUnsupportedError,
 )
+from ..media import MediaKind
 from ..messages import (
     FinishReason,
     Message,
@@ -33,8 +34,9 @@ from ..messages import (
 )
 from .base import BaseProvider
 
-#: Ollama reports capabilities in `/api/show`; this is the tool-calling marker.
+#: Ollama reports capabilities in `/api/show`; these are the markers we read.
 _TOOLS_CAPABILITY = "tools"
+_VISION_CAPABILITY = "vision"
 
 
 class OllamaProvider(BaseProvider):
@@ -56,6 +58,7 @@ class OllamaProvider(BaseProvider):
         self._owns_client = client is None
         #: Populated by `health_check`; None means "not yet determined".
         self._supports_tools: bool | None = None
+        self._supports_vision: bool | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -78,6 +81,16 @@ class OllamaProvider(BaseProvider):
                 )
                 continue
             entry: dict[str, Any] = {"role": message.role, "content": message.content}
+            # Ollama carries images as base64 on the message. It has no audio or
+            # video input path, so those attachments are dropped rather than
+            # smuggled in as something the model cannot interpret.
+            images = [
+                a.data_base64
+                for a in message.attachments
+                if a.kind is MediaKind.IMAGE and self._supports_vision is not False
+            ]
+            if images:
+                entry["images"] = images
             if message.tool_calls:
                 entry["tool_calls"] = [
                     {"function": {"name": call.name, "arguments": call.arguments}}
@@ -315,6 +328,7 @@ class OllamaProvider(BaseProvider):
             return None
         capabilities = payload.get("capabilities")
         if isinstance(capabilities, list):
+            self._supports_vision = _VISION_CAPABILITY in capabilities
             return _TOOLS_CAPABILITY in capabilities
         template = str(payload.get("template", ""))
         if template:
@@ -322,11 +336,17 @@ class OllamaProvider(BaseProvider):
         return None
 
     def capabilities(self) -> ProviderCapabilities:
+        # Vision depends entirely on the local model, so it is reported as false
+        # until `/api/show` actually says otherwise. Claiming it optimistically
+        # would mean silently dropping images the user believed were sent.
         return ProviderCapabilities(
             native_tool_calls=self._supports_tools is not False,
             streaming=True,
             system_instruction=True,
             max_context_tokens=None,
+            vision=self._supports_vision is True,
+            audio=False,
+            video=False,
         )
 
     async def aclose(self) -> None:
