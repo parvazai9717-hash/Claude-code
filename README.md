@@ -311,8 +311,12 @@ it is stored, and a proposal that looks like a credential is refused outright.
 ```bash
 local-agent memory list
 local-agent memory remove 3
-local-agent clear-data
+local-agent clear-data                 # sessions, messages, tasks, facts, events
+local-agent clear-data --connectors    # those, plus connector definitions
 ```
+
+Connector definitions are configuration rather than stored data, so `clear-data`
+keeps them by default and tells you it did. Workspace files are never touched.
 
 No vector database is used. A `Retriever` interface exists so semantic search can
 be added later without changing any caller.

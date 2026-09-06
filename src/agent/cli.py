@@ -1127,29 +1127,74 @@ def connectors_test(
 @app.command("clear-data")
 def clear_data(
     yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt."),
+    connectors: bool = typer.Option(
+        False,
+        "--connectors",
+        help="Also delete connector definitions. They are configuration, so they are kept by default.",
+    ),
 ) -> None:
-    """Delete all local data: sessions, messages, tasks, facts and events."""
+    """Delete stored data: sessions, messages, tasks, facts and events.
+
+    Connector definitions are configuration rather than data, so they survive
+    unless you pass --connectors. Workspace files are never touched.
+    """
     context = get_context()
+    manager = _manager(context)
     stats = context.database.stats()
     total = sum(stats.values())
+    configured = manager.list_connectors()
+
     table = Table(title="About to delete")
-    table.add_column("Table", style="bold")
-    table.add_column("Rows", justify="right")
+    table.add_column("Item", style="bold")
+    table.add_column("Count", justify="right")
     for name, count in stats.items():
         table.add_row(name, str(count))
+    if configured:
+        table.add_row(
+            "connectors",
+            f"[red]{len(configured)}[/red]"
+            if connectors
+            else f"[dim]{len(configured)} (kept)[/dim]",
+        )
     console.print(table)
-    if total == 0:
+
+    if total == 0 and not (connectors and configured):
         console.print("[dim]nothing to delete[/dim]")
+        # Say so rather than leaving the user to wonder why `doctor` still
+        # reports connectors after a command that claimed to clear everything.
+        if configured:
+            console.print(
+                f"[dim]{len(configured)} connector definition(s) are configuration and were "
+                "kept. Remove them with `local-agent connectors remove NAME`, or re-run "
+                "this with --connectors.[/dim]"
+            )
         return
+
+    scope = f"{total} rows from {context.config.database_path}"
+    if connectors and configured:
+        scope += f", and {len(configured)} connector definition(s)"
     console.print(
-        f"[yellow]This permanently deletes {total} rows from "
-        f"{context.config.database_path}. Workspace files are not touched.[/yellow]"
+        f"[yellow]This permanently deletes {scope}. Workspace files are not touched.[/yellow]"
     )
-    if not yes and not typer.confirm("Delete all local agent data?"):
+
+    if not yes and not typer.confirm("Delete it?"):
         console.print("[dim]cancelled[/dim]")
         return
+
     deleted = context.database.clear_all()
     console.print(f"deleted {sum(deleted.values())} rows")
+
+    if connectors:
+        for entry in configured:
+            manager.remove_connector(entry["name"])
+        if configured:
+            console.print(f"deleted {len(configured)} connector definition(s)")
+    elif configured:
+        console.print(
+            f"[dim]kept {len(configured)} connector definition(s): "
+            f"{', '.join(c['name'] for c in configured)}. "
+            "They are configuration, not data. Use --connectors to remove them too.[/dim]"
+        )
 
 
 def main() -> None:

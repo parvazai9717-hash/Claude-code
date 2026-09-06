@@ -195,3 +195,35 @@ def test_the_workspace_is_created_on_first_use(tmp_path: Path) -> None:
     assert workspace.is_dir()
     for name in ("files", "projects", "downloads", "outputs", "temp", "state"):
         assert (workspace / name).is_dir()
+
+
+def test_clear_data_keeps_connectors_but_says_so() -> None:
+    """A command claiming to clear everything must not silently leave data behind."""
+    _invoke("-p", "mock", "connectors", "add", "leftover", "--command", "npx")
+    _invoke("-p", "mock", "task", "create", "something")
+
+    result = _invoke("-p", "mock", "clear-data", "--yes")
+    assert result.exit_code == 0
+    assert "kept" in result.output
+    assert "leftover" in result.output
+    assert "--connectors" in result.output, "the way to remove them must be shown"
+
+    # The connector really is still there.
+    assert "leftover" in _invoke("-p", "mock", "connectors", "list").output
+
+
+def test_clear_data_removes_connectors_when_asked() -> None:
+    _invoke("-p", "mock", "connectors", "add", "leftover", "--command", "npx")
+    _invoke("-p", "mock", "task", "create", "something")
+
+    result = _invoke("-p", "mock", "clear-data", "--yes", "--connectors")
+    assert result.exit_code == 0
+    assert "connector definition" in result.output
+    assert "no connectors configured" in _invoke("-p", "mock", "connectors", "list").output
+
+
+def test_clear_data_on_an_empty_database_still_reports_kept_connectors() -> None:
+    _invoke("-p", "mock", "connectors", "add", "leftover", "--command", "npx")
+    result = _invoke("-p", "mock", "clear-data", "--yes")
+    assert "nothing to delete" in result.output
+    assert "kept" in result.output
