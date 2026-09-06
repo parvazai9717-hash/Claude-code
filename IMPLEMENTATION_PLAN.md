@@ -80,10 +80,10 @@ Final run, offline, with no network, no API key, no Ollama server and no browser
 
 ```text
 $ .venv/bin/python -m pytest
-387 passed in 3.15s
+418 passed in 3.83s
 
-$ .venv/bin/python -m pytest tests/unit          328 passed
-$ .venv/bin/python -m pytest tests/integration    59 passed
+$ .venv/bin/python -m pytest tests/unit          341 passed
+$ .venv/bin/python -m pytest tests/integration    77 passed
 
 $ .venv/bin/python -m ruff format src tests scripts   all formatted
 $ .venv/bin/python -m ruff check  src tests scripts   All checks passed!
@@ -98,7 +98,8 @@ symlink escape · secret-file protection · file limits · output truncation · 
 and policy · approval modes · redaction · task-state transitions · pause, resume and
 cancellation · verification and failed verification · replan limits · SQLite persistence ·
 durable-memory approval · skill metadata and permissions · unavailable browser · step and
-tool-call limits · the CLI end to end.
+tool-call limits · the interactive approval prompt · the `chat` command and its slash
+commands · the CLI end to end.
 
 The ten required integration scenarios all pass: conversation with no tools; read then
 verified answer; approved write; approval denial; tool failure and replan; verification
@@ -121,6 +122,9 @@ Recorded because each was caught by a test rather than by inspection:
    earlier draft; it now records a proper failure entry on recovery.
 5. **`list` as a method name shadowed the builtin inside its own class**, which mypy caught
    as a genuine typing hazard. Renamed to `list_tasks` / `list_facts` / `list_summaries`.
+6. **Three untested paths were reported as complete**: `ConsoleApprover`, the `chat`
+   command, and the slash commands had no automated coverage, and the first was wrongly
+   described as untestable here. All three are now covered.
 
 ## Manual tests that could not be run here
 
@@ -133,7 +137,14 @@ They are **pending**, not passing:
 | Live Gemini health check | `local-agent -p gemini doctor` | Same. Verified only that it reports the missing key correctly. |
 | Live Ollama generation | `local-agent -p ollama chat "..."` | No Ollama server running. |
 | Ollama model capability probe | `local-agent -p ollama doctor` | Same. |
-| Interactive approval prompts | `local-agent chat` | Needs a TTY. `ConsoleApprover` is exercised only through its non-interactive siblings. |
+
+An earlier draft of this table also listed the interactive approval prompt as
+untestable "because it needs a TTY". That was wrong: `ConsoleApprover` writes to an
+injectable `rich` console and reads one keypress from stdin, both of which a test can
+supply. The gap was missing coverage, not an environmental limit, and it is now closed by
+`tests/unit/test_console_approver.py` (13 cases) and `tests/integration/test_cli_chat.py`
+(18 cases covering `chat`, the approval prompt in situ, and every slash command).
+
 
 Both adapters are covered offline: Gemini through a fake client that asserts schema
 conversion, response parsing, thought-part suppression, disabled automatic function
