@@ -223,3 +223,37 @@ def test_a_missing_env_file_is_not_an_error(
 
     monkeypatch.chdir(tmp_path)
     assert load_environment_file() is None
+
+
+# -- Windows paths in YAML --------------------------------------------------
+def test_a_windows_path_loads_from_yaml(tmp_path: Path) -> None:
+    """Forward slashes and single quotes both work; double quotes do not.
+
+    A double-quoted YAML scalar processes escape sequences, so `"D:\\Agent"`
+    fails to parse at all. That is a confusing way to lose an afternoon, so the
+    forms are pinned here and the example file warns about it.
+    """
+    for text in (
+        "data_dir: D:/Agent/data",
+        r"data_dir: 'D:\Agent\data'",
+        r"data_dir: D:\Agent\data",
+    ):
+        path = tmp_path / "config.yaml"
+        path.write_text(text + "\n")
+        config = load_config(path, environ={}, load_dotenv_file=False)
+        assert "Agent" in str(config.data_dir)
+
+
+def test_a_double_quoted_windows_path_is_reported_not_swallowed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text('data_dir: "D:\\Agent\\data"\n')
+    with pytest.raises(ConfigurationError, match="not valid"):
+        load_config(path, environ={}, load_dotenv_file=False)
+
+
+def test_the_shipped_example_still_parses() -> None:
+    """The example is documentation people copy; it must always load."""
+    config = load_config(Path("config.example.yaml"), environ={}, load_dotenv_file=False)
+    assert config.provider in {"gemini", "ollama", "mock"}

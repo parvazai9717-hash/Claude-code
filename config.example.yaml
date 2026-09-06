@@ -7,6 +7,12 @@ model: null                            # optional override for the provider's ow
 workspace: ./workspace                 # hard filesystem boundary for every file tool
 data_dir: ~/.local-agent               # SQLite database and JSONL logs
 
+# Both accept an absolute path, on any drive:
+#   data_dir: D:/Agent/data             # forward slashes work on Windows too
+#   data_dir: 'D:\Agent\data'           # backslashes need SINGLE quotes
+# Do NOT use double quotes around a backslash path — YAML reads \A as an escape
+# sequence and the file fails to parse.
+
 # --- Provider settings ----------------------------------------------------
 gemini_model: gemini-2.5-flash
 gemini_timeout_seconds: 120
