@@ -114,3 +114,44 @@ def test_shell_tool_classification() -> None:
     assert definition.requires_verification is True
     assert definition.read_only is False
     assert definition.reversible is False
+
+
+# -- platform portability ---------------------------------------------------
+def test_process_group_arguments_match_the_platform() -> None:
+    """`start_new_session` is POSIX-only and raises if passed on Windows."""
+    from agent.tools.shell import IS_WINDOWS, new_process_group_kwargs
+
+    kwargs = new_process_group_kwargs()
+    if IS_WINDOWS:
+        assert "creationflags" in kwargs and "start_new_session" not in kwargs
+    else:
+        assert kwargs == {"start_new_session": True}
+
+
+def test_the_child_environment_has_a_usable_search_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PATH", raising=False)
+    assert build_child_env("/tmp/ws")["PATH"], "a child with no PATH can run nothing"
+
+
+def test_home_points_at_the_workspace_on_either_platform() -> None:
+    from agent.tools.shell import IS_WINDOWS
+
+    env = build_child_env("/tmp/ws")
+    assert env["HOME"] == "/tmp/ws"
+    if IS_WINDOWS:
+        assert env["USERPROFILE"] == "/tmp/ws"
+
+
+async def test_a_timed_out_process_is_stopped_not_orphaned(
+    context: ToolContext, config: Config
+) -> None:
+    """The child must actually be gone, whatever the platform's kill mechanism."""
+    config.limits.tool_timeout_seconds = 0.5
+    config.shell_allowed_commands = ["python3"]
+    output = await RunShellTool().run(
+        {"command": ["python3", "-c", "import time; time.sleep(30)"]}, context
+    )
+    assert output["timed_out"] is True
+    assert output["exit_code"] != 0

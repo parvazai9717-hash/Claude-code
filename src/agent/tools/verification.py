@@ -16,7 +16,7 @@ from ..messages import RiskCategory, RiskLevel
 from ..security.permissions import PermissionChecker
 from .base import Tool, ToolContext
 from .filesystem import looks_binary
-from .shell import build_child_env
+from .shell import build_child_env, new_process_group_kwargs
 
 
 class VerifyResultTool(Tool):
@@ -176,7 +176,7 @@ class VerifyResultTool(Tool):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
+            **new_process_group_kwargs(),
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(

@@ -126,9 +126,12 @@ Shell is the highest-risk capability, and is treated accordingly:
    passed through; `HOME` points at the workspace. No credential in the parent
    environment can reach a child.
 6. **Workspace working directory**, validated through `PathPolicy`.
-7. **Timeout with process-group cleanup.** The child runs in its own session;
-   a timeout sends `SIGTERM` then `SIGKILL` to the whole group, so a spawned tree
-   cannot survive.
+7. **Timeout with process-group cleanup.** On macOS and Linux the child runs in
+   its own session, and a timeout sends `SIGTERM` then `SIGKILL` to the whole
+   group, so a spawned tree cannot survive. **On Windows this guarantee is
+   weaker**: there is no `killpg`, so the child is terminated directly and the OS
+   usually — but not always — cleans up its descendants. Set
+   `shell_enabled: false` if that matters to you.
 8. **Output limits** on stdout and stderr, with truncation reported honestly.
 9. **Double-checked.** The allowlist is verified by the permission layer *and* again
    immediately before spawning.

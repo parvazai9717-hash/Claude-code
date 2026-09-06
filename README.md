@@ -72,7 +72,10 @@ and sub-agent boundaries; **an interface does not make a capability available**.
 
 ## Installation
 
-Requires Python 3.11 or newer.
+Requires Python 3.11 or newer. Works on macOS, Linux and Windows.
+
+**New here? [`INSTALL.md`](INSTALL.md) is a step-by-step guide** covering all three
+platforms, both providers, and the first run. The short version follows.
 
 ```bash
 git clone <this-repository>

@@ -12,6 +12,8 @@ import asyncio
 import os
 import shutil
 import signal
+import subprocess
+import sys
 from typing import Any
 
 from ..errors import ErrorCategory, PermissionDeniedError, ToolError
@@ -20,23 +22,53 @@ from ..security.limits import truncate_output
 from ..security.permissions import PermissionChecker
 from .base import Tool, ToolContext
 
+#: True on Windows, where process groups and POSIX signals work differently.
+IS_WINDOWS = sys.platform == "win32"
+
 #: Environment variables passed through to the child. Everything else is dropped,
 #: so a credential in the parent environment can never reach a subprocess.
-_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TERM", "TZ")
+#: Windows needs a few more: without SystemRoot most executables fail to start.
+_ENV_ALLOWLIST = (
+    ("PATH", "LANG", "LC_ALL", "TERM", "TZ")
+    if not IS_WINDOWS
+    else ("PATH", "SystemRoot", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TZ")
+)
 
-#: Grace period between SIGTERM and SIGKILL when a command times out.
+#: Fallback search path when the parent has none.
+_DEFAULT_PATH = (
+    "C:\\Windows\\system32;C:\\Windows" if IS_WINDOWS else "/usr/local/bin:/usr/bin:/bin"
+)
+
+#: Grace period between the polite stop and the forced kill when a command times out.
 _KILL_GRACE_SECONDS = 2.0
 
 
 def build_child_env(workspace: str) -> dict[str, str]:
     """A minimal, credential-free environment for a child process."""
     env = {name: os.environ[name] for name in _ENV_ALLOWLIST if name in os.environ}
-    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env.setdefault("PATH", _DEFAULT_PATH)
+    # Point the child's home at the workspace on either platform, so a tool that
+    # writes to "~" lands inside the boundary rather than in the real profile.
     env["HOME"] = workspace
     env["PWD"] = workspace
+    if IS_WINDOWS:
+        env["USERPROFILE"] = workspace
     # Signal to child tooling that this is a constrained, non-interactive context.
     env["LOCAL_AGENT_SANDBOX"] = "1"
     return env
+
+
+def new_process_group_kwargs() -> dict[str, Any]:
+    """Spawn arguments that put a child in its own group, per platform.
+
+    A child in its own group can be killed together with anything it spawned,
+    which is what makes a timeout actually stop the work rather than orphan it.
+    """
+    if IS_WINDOWS:
+        # CREATE_NEW_PROCESS_GROUP is the Windows equivalent; `start_new_session`
+        # is POSIX-only and raises if passed here.
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
 
 
 class RunShellTool(Tool):
@@ -117,7 +149,7 @@ class RunShellTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,
             # A new process group means a timeout can kill children too.
-            start_new_session=True,
+            **new_process_group_kwargs(),
         )
 
         timed_out = False
@@ -149,13 +181,20 @@ class RunShellTool(Tool):
 
     @staticmethod
     async def _terminate(process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
-        """Kill a timed-out process group and collect whatever output exists."""
-        for send_signal in (signal.SIGTERM, signal.SIGKILL):
+        """Stop a timed-out process, then collect whatever output exists.
+
+        On POSIX the whole process group is signalled, so a command that spawned
+        children does not leave them running. Windows has no `killpg`, so the
+        child is terminated directly — its group flag still lets the OS clean up
+        descendants in most cases, but the guarantee is weaker, which SECURITY.md
+        states rather than glosses over.
+        """
+        for escalate in (False, True):
             if process.returncode is not None:
                 break
             try:
-                os.killpg(os.getpgid(process.pid), send_signal)
-            except (ProcessLookupError, PermissionError):
+                _stop_process(process, force=escalate)
+            except (ProcessLookupError, PermissionError, OSError):
                 break
             try:
                 await asyncio.wait_for(process.wait(), timeout=_KILL_GRACE_SECONDS)
@@ -165,3 +204,13 @@ class RunShellTool(Tool):
             return await asyncio.wait_for(process.communicate(), timeout=_KILL_GRACE_SECONDS)
         except (TimeoutError, ValueError):
             return b"", b""
+
+
+def _stop_process(process: asyncio.subprocess.Process, *, force: bool) -> None:
+    """Ask a process to stop, or force it, using whatever the platform offers."""
+    if IS_WINDOWS:
+        # No process groups to signal: terminate() maps to TerminateProcess.
+        process.kill() if force else process.terminate()
+        return
+    send_signal = signal.SIGKILL if force else signal.SIGTERM
+    os.killpg(os.getpgid(process.pid), send_signal)
