@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,62 @@ def test_toml_config_is_supported(tmp_path: Path) -> None:
     config = load_config(path, environ={}, load_dotenv_file=False)
     assert config.provider == "mock"
     assert config.limits.max_steps == 5
+
+
+# -- .env discovery ---------------------------------------------------------
+def test_env_file_is_found_in_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user expects the `.env` beside them, not one beside the installed package."""
+    from agent.config import find_environment_file
+
+    monkeypatch.chdir(tmp_path)
+    assert find_environment_file() is None
+    (tmp_path / ".env").write_text("GEMINI_API_KEY=x\n")
+    assert find_environment_file() == tmp_path / ".env"
+
+
+def test_env_file_is_found_in_a_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".env").write_text("GEMINI_API_KEY=x\n")
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    from agent.config import find_environment_file
+
+    assert find_environment_file() == tmp_path / ".env"
+
+
+def test_loading_env_does_not_clobber_the_real_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported variable is a deliberate override and must win over a file."""
+    from agent.config import load_environment_file
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("LOCAL_AGENT_TEST_VALUE=from-file\n")
+    monkeypatch.setenv("LOCAL_AGENT_TEST_VALUE", "from-shell")
+    load_environment_file()
+    assert os.environ["LOCAL_AGENT_TEST_VALUE"] == "from-shell"
+
+
+def test_loading_env_sets_an_unset_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.config import load_environment_file
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOCAL_AGENT_TEST_VALUE", raising=False)
+    (tmp_path / ".env").write_text("LOCAL_AGENT_TEST_VALUE=from-file\n")
+    assert load_environment_file() == tmp_path / ".env"
+    assert os.environ["LOCAL_AGENT_TEST_VALUE"] == "from-file"
+
+
+def test_a_missing_env_file_is_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.config import load_environment_file
+
+    monkeypatch.chdir(tmp_path)
+    assert load_environment_file() is None

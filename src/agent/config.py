@@ -328,6 +328,40 @@ def _read_config_file(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def find_environment_file(start: Path | None = None) -> Path | None:
+    """Locate the `.env` file, searching from `start` (default: the working directory).
+
+    `python-dotenv`'s default search walks up from *its caller's source file*,
+    which for an installed package means site-packages — so a `.env` sitting in
+    the directory the user is actually running from is never found. Searching
+    from the working directory is what a user expects, and is the only thing
+    that works for a non-editable install.
+    """
+    current = (start or Path.cwd()).expanduser().resolve()
+    for directory in (current, *current.parents):
+        candidate = directory / ".env"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_environment_file(start: Path | None = None) -> Path | None:
+    """Load `.env` into the process environment. Returns the file used, if any.
+
+    Existing environment variables win: something exported in the shell is a
+    deliberate override and must not be clobbered by a file on disk.
+    """
+    path = find_environment_file(start)
+    if path is None:
+        return None
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover - python-dotenv is a hard dependency
+        return None
+    load_dotenv(dotenv_path=str(path), override=False)
+    return path
+
+
 def find_config_file(start: Path | None = None) -> Path | None:
     """Locate a config file in `start` (default: the current directory)."""
     base = (start or Path.cwd()).expanduser()
@@ -403,12 +437,7 @@ def load_config(
         ConfigurationError: With an actionable message when validation fails.
     """
     if load_dotenv_file and environ is None:
-        try:
-            from dotenv import load_dotenv
-
-            load_dotenv(override=False)
-        except ImportError:  # pragma: no cover - python-dotenv is a hard dependency
-            pass
+        load_environment_file()
 
     env = dict(os.environ if environ is None else environ)
 

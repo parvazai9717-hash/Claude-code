@@ -264,11 +264,20 @@ def doctor() -> None:
         row("credential", True, "this provider needs no API key")
     else:
         present = config.has_credential()
-        row(
-            "credential",
-            present,
-            f"{credential_var} is set" if present else f"{credential_var} is not set",
-        )
+        if present:
+            row("credential", True, f"{credential_var} is set")
+        else:
+            # Say where the .env was looked for, so a missing key is diagnosable
+            # rather than just asserted.
+            from .config import find_environment_file
+
+            env_file = find_environment_file()
+            where = (
+                f"loaded {env_file}, but it does not define {credential_var}"
+                if env_file
+                else f"no .env file found, searching upward from {Path.cwd()}"
+            )
+            row("credential", False, f"{credential_var} is not set - {where}")
 
     try:
         provider = create_provider(config)
@@ -283,12 +292,18 @@ def doctor() -> None:
     manager = _manager(context)
     media = manager.media_support()
     accepted = [kind for kind, ok in media["accepted"].items() if ok]
-    row(
-        "media input",
-        bool(accepted),
-        (", ".join(accepted) if accepted else "text only")
-        + ("" if media["video_enabled"] else "; video disabled"),
-    )
+    if accepted:
+        row(
+            "media input",
+            True,
+            ", ".join(accepted) + ("" if media["video_enabled"] else "; video disabled"),
+        )
+    elif credential_var is not None and not config.has_credential():
+        # Capabilities come from the provider, which could not be built. Reporting
+        # "text only" here would be an assertion we have no basis for.
+        row("media input", None, "unknown until the provider is configured")
+    else:
+        row("media input", False, "text only; this model accepts no media input")
 
     connectors = manager.list_connectors()
     if not config.connectors_enabled:
