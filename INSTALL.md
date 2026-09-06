@@ -4,6 +4,34 @@ Works on **macOS**, **Linux** and **Windows**. Takes about five minutes.
 
 ---
 
+## Windows: the one-command version
+
+If you are on Windows and just want it installed, open **PowerShell** in the
+folder where you want it and run:
+
+```powershell
+git clone -b claude/new-session-orxpij https://github.com/parvazai9717-hash/Claude-code.git local-agent
+cd local-agent
+.\scripts\install.ps1
+```
+
+The script checks your Python and git, creates the virtual environment, installs
+everything, and verifies it by running a complete agent loop offline. It needs no
+admin rights, changes no system settings, and touches nothing outside this folder.
+**Read `scripts/install.ps1` first if you like** — it is short and deliberately
+does nothing surprising.
+
+If PowerShell refuses to run it:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Then run the script again. Everything below is the same thing done by hand, and
+covers macOS and Linux too.
+
+---
+
 ## 1. Check you have Python 3.11 or newer
 
 ```bash
