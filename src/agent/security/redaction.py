@@ -31,6 +31,14 @@ VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bearer", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/\-]{8,}=*")),
     # Google / Gemini API keys.
     ("google_key", re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}\b")),
+    # Google OAuth credentials. AI Studio now issues keys in the `AQ.` form, and
+    # `ya29.` is the long-standing access-token prefix; neither looks like AIza,
+    # so both were previously invisible outside a NAME=value assignment.
+    ("google_oauth", re.compile(r"\bAQ\.[A-Za-z0-9_\-]{20,}")),
+    ("google_access_token", re.compile(r"\bya29\.[A-Za-z0-9_\-]{20,}")),
+    # Google OAuth client secrets and refresh tokens.
+    ("google_client_secret", re.compile(r"\bGOCSPX-[A-Za-z0-9_\-]{10,}")),
+    ("google_refresh", re.compile(r"\b1//[0-9A-Za-z_\-]{20,}")),
     # OpenAI-style and generic long secret keys.
     ("sk_key", re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_\-]{16,}\b")),
     # GitHub tokens.

@@ -69,10 +69,18 @@ whether a variable is *set*.
 
 - **By key** — any mapping key matching `api_key|secret|password|token|credential|
   authorization|auth|private_key|…` has its value replaced outright.
-- **By value shape** — Google API keys, `sk-`/`rk-`/`pk-` keys, GitHub tokens, AWS
-  access key IDs, Slack tokens, JWTs, PEM private-key blocks, `Authorization:`
-  headers (the whole remainder of the line), `Bearer` tokens, and
-  `NAME=value` assignments for credential-shaped names.
+- **By value shape** — Google credentials in every form they are issued
+  (`AIza…` API keys, `AQ.…` AI Studio keys, `ya29.…` access tokens, `GOCSPX-…`
+  client secrets, `1//…` refresh tokens), `sk-`/`rk-`/`pk-` keys, GitHub tokens,
+  AWS access key IDs, Slack tokens, JWTs, PEM private-key blocks,
+  `Authorization:` headers (the whole remainder of the line), `Bearer` tokens,
+  and `NAME=value` assignments for credential-shaped names.
+
+  The `AQ.` form was added after a real key of that shape was observed passing
+  through untouched: it resembles none of the older Google patterns, so only the
+  `NAME=value` rule caught it, and only when it happened to be written that way.
+  A credential in prose or in a JSON value went through unredacted. If you find
+  another shape that survives, it is a bug — report it.
 - **By literal** — the actual values of credential-shaped environment variables, so
   a key matching no known pattern is still removed.
 

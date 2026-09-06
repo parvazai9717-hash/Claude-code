@@ -175,7 +175,13 @@ Recorded because each was caught by a test rather than by inspection:
    took effect before any test uses it, and is pinned by
    `tests/integration/test_home_isolation.py` — which exercises `posixpath` and
    `ntpath` expansion side by side so a Linux run catches a Windows-only hole.
-9. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
+9. **Redaction missed most Google credential formats.** Only `AIza…` keys were
+   matched. AI Studio issues keys in an `AQ.…` form, and OAuth uses `ya29.…`,
+   `GOCSPX-…` and `1//…`; none matched, so such a credential was redacted only
+   when written as `NAME=value`, and passed through untouched in prose or in a
+   JSON value. Found when a user pasted a real key of that shape. All five forms
+   are now matched and pinned by a test that checks each one in five contexts.
+10. **A truncated id could not be pasted back.** `rich` clips a long id to fit the
    terminal (`sess_f42d09c07e…`), so a user copying one off their own screen got
    "no session named …". Sessions now resolve by unambiguous prefix — as tasks already
    did — and both strip a trailing ellipsis. Found by a test that scraped a rendered

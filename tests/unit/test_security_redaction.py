@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent.security.redaction import PLACEHOLDER, Redactor
 
 
@@ -80,3 +82,34 @@ def test_non_string_scalars_pass_through() -> None:
 def test_extra_secrets_are_honoured() -> None:
     redactor = Redactor(environ={}, extra_secrets=["a-custom-secret-string"])
     assert "a-custom-secret-string" not in redactor.redact_text("x a-custom-secret-string y")
+
+
+@pytest.mark.parametrize(
+    ("secret", "what"),
+    [
+        ("AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q", "classic AIza API key"),
+        ("AQ.EXAMPLEexampleEXAMPLEexampleEXAMPLEexample1234", "AI Studio AQ. key"),
+        ("ya29.a0ARrdaM9xKxKxKxKxKxKxKxKxKxKxKxKxKx", "OAuth access token"),
+        ("GOCSPX-abcdefghijklmnopqrstuvwxyz", "OAuth client secret"),
+        ("1//0abcdefghijklmnopqrstuvwxyz1234", "OAuth refresh token"),
+    ],
+)
+def test_every_google_credential_shape_is_redacted(secret: str, what: str) -> None:
+    """A credential must be caught wherever it appears, not only as NAME=value.
+
+    The `AQ.` form was added after a key of that shape was seen passing through
+    untouched in prose and in JSON: it matches none of the older patterns, so
+    only the assignment rule caught it, and only when written as an assignment.
+
+    Every value here is synthetic. Never put a real credential in a test — it
+    ends up in git history, where redaction cannot reach it.
+    """
+    redactor = Redactor(environ={})
+    for context in (
+        f"GEMINI_API_KEY={secret}",
+        f'{{"key": "{secret}"}}',
+        f"the key is {secret} and it works",
+        f"curl -H 'Authorization: Bearer {secret}'",
+        secret,
+    ):
+        assert secret not in redactor.redact_text(context), f"{what} leaked in: {context[:40]}"
