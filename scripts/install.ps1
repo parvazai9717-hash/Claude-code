@@ -114,9 +114,27 @@ Write-Good "git $((& git --version) -replace 'git version ', '')"
 Write-Step "Fetching the code"
 
 $Root = Resolve-Path -LiteralPath $Path
-$Target = Join-Path $Root "local-agent"
 
-if (Test-Path -LiteralPath (Join-Path $Target ".git")) {
+# Running from inside an existing checkout is the common case — the README tells
+# you to clone first, then run this. Detect that and work in place, rather than
+# cloning a second copy into a nested folder.
+$here = Join-Path $Root ".git"
+$hereMarker = Join-Path $Root "pyproject.toml"
+if ((Test-Path -LiteralPath $here) -and (Test-Path -LiteralPath $hereMarker)) {
+    $Target = $Root
+    Write-Good "Already inside the repository at $Target - using it in place"
+    Push-Location $Target
+    try {
+        & git fetch origin $Branch 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            & git checkout $Branch 2>$null
+            & git pull origin $Branch 2>$null
+        } else {
+            Write-Warn2 "Could not reach GitHub to update - continuing with what is on disk"
+        }
+    } finally { Pop-Location }
+} elseif (Test-Path -LiteralPath (Join-Path $Root "local-agent\.git")) {
+    $Target = Join-Path $Root "local-agent"
     Write-Good "Already cloned at $Target - updating"
     Push-Location $Target
     try {
@@ -126,6 +144,7 @@ if (Test-Path -LiteralPath (Join-Path $Target ".git")) {
         & git pull origin $Branch
     } finally { Pop-Location }
 } else {
+    $Target = Join-Path $Root "local-agent"
     & git clone --branch $Branch $RepoUrl $Target
     if ($LASTEXITCODE -ne 0) {
         Stop-WithHelp `
